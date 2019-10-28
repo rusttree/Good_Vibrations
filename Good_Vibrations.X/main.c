@@ -43,10 +43,14 @@
 #define _XTAL_FREQ 32000000
 
 unsigned char sleep = 0;
+unsigned char foo = 0xFF;
+unsigned char record = 0;
 
 void __interrupt() isr(void)
 {
     unsigned char tmr;
+    static unsigned char override = 0;
+    static unsigned short ocount = 0;
 
     if ( IOCAFbits.IOCAF5 )
     {
@@ -65,9 +69,35 @@ void __interrupt() isr(void)
             //Since Timer0 is 0.5us per tic, the value in TMR0 divided by 2 is
             //the number of microseconds of the measured pulse width.
             tmr = TMR0;
+
             //Switch to rising edge IOC
             IOCAPbits.IOCAP5 = 1;
             IOCANbits.IOCAN5 = 0;
+
+            //Special case: If in ramp function, override to hold the high point for 1 full second
+            //longer and then rapidly ramp down to "catch up" at the low point. The max duty
+            //cycle value of tmr during the ramp appears to be 0xA9, so use that value as the 
+            //indicator that we're in the ramp function.
+            if ( (tmr >= 0xA8) && (tmr <= 0xAA) )
+            {
+                override = 1;
+                ocount = 0;
+            }
+
+            if ( override )
+            {
+                if ( tmr < 0xA8 )
+                {
+                    //Override tmr value to 10000 cycles to keep vibration at ramp max for 1 second
+                    tmr = 0xA9;
+                    ocount++;
+                    if ( ocount > 10000 )
+                    {
+                        override = 0;
+                        ocount = 0;
+                    }
+                }
+            }
 
             //Timer0 and Timer2 are setup such that tmr and PWM5DCH are 1:1.
             //So to get a lower duty cycle, just subject a constant value from tmr.
@@ -119,6 +149,7 @@ void Init_Timer0(void)
 void Init_Timer2(void)
 {
     //Timer2 controls PWM output
+    //10kHz PWM
     T2CONbits.T2CKPS = 0b01; //Prescaler is 4
     PR2 = 199;
 
